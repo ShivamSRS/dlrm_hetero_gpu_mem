@@ -185,8 +185,8 @@ def add_training_args(parser):
     group.add_argument('--DDP-impl', default='local',
                        help='which DistributedDataParallel implementation '
                        'to use. One of [local, torch]')
-    group.add_argument('--local_rank', type=int, default=None,
-                       help='local rank passed from distributed launcher')
+    # group.add_argument('--local_rank', type=int, default=None,
+    #                    help='local rank passed from distributed launcher')
     # autoresume
     group.add_argument('--adlr-autoresume', action='store_true',
                        help='enable autoresume on adlr cluster.')
@@ -423,7 +423,7 @@ def get_args():
         num_nodes = int(os.getenv('SLURM_JOB_NUM_NODES', '1'))
         nodeid = int(os.getenv('SLURM_NODEID', '0'))
 
-        args.local_rank = os.environ['LOCAL_RANK'] #local_rank
+        args.local_rank = local_rank
         args.rank = nodeid*local_size + local_rank
         args.world_size = num_nodes*local_size
 
