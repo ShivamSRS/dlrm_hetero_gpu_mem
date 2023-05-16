@@ -22,7 +22,7 @@ import numpy as np
 import torch
 
 from torch.nn.parallel.distributed import DistributedDataParallel as torchDDP
-from fp16 import FP16_Optimizer
+# from fp16 import FP16_Optimizer
 import mpu
 
 
