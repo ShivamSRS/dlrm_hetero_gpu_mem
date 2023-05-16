@@ -423,7 +423,7 @@ def get_args():
         num_nodes = int(os.getenv('SLURM_JOB_NUM_NODES', '1'))
         nodeid = int(os.getenv('SLURM_NODEID', '0'))
 
-        args.local_rank = local_rank
+        args.local_rank = os.environ['LOCAL_RANK'] #local_rank
         args.rank = nodeid*local_size + local_rank
         args.world_size = num_nodes*local_size
 
