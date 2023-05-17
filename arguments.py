@@ -185,8 +185,8 @@ def add_training_args(parser):
     group.add_argument('--DDP-impl', default='local',
                        help='which DistributedDataParallel implementation '
                        'to use. One of [local, torch]')
-    # group.add_argument('--local_rank', type=int, default=None,
-    #                    help='local rank passed from distributed launcher')
+    group.add_argument('--local_rank', type=int, default=None,
+                       help='local rank passed from distributed launcher')
     # autoresume
     group.add_argument('--adlr-autoresume', action='store_true',
                        help='enable autoresume on adlr cluster.')
@@ -437,6 +437,7 @@ def get_args():
         args.dynamic_loss_scale = True
         if args.rank == 0:
             print(' > using dynamic loss scaling')
+            print("in getargs arguments.py")
 
     # The args fp32_* or fp16_* meant to be active when the
     # args fp16 is set. So the default behaviour should all

@@ -48,7 +48,7 @@ import torch.optim as optim
 from pytorch_pretrained_bert import BertTokenizer
 from model import DistributedDataParallel as LocalDDP
 import mpu 
-os.environ['CUDA_VISIBLE_DEVICES']='0,1,2,3'
+os.environ['CUDA_VISIBLE_DEVICES']='0,1'
 
 
 def get_model(args):
@@ -169,12 +169,15 @@ def initialize_distributed(args):
     if args.local_rank is not None:
         device = args.local_rank
         print("local",args.local_rank)
-    torch.cuda.set_device(device)
+    print("about to set device",device,torch.cuda.current_device())
+    torch.cuda.set_device("cuda:"+str(device))
+    print("device is set",device)
     # Call the init process
     init_method = 'tcp://'
     master_ip = os.getenv('MASTER_ADDR', 'localhost')
     master_port = os.getenv('MASTER_PORT', '6000')
     init_method += master_ip + ':' + master_port
+    print("about to initialize torch init distributed group")
     torch.distributed.init_process_group(
         backend=args.distributed_backend,
         world_size=args.world_size, rank=args.rank,
@@ -263,7 +266,7 @@ def main():
     
     # Arguments.
     args = get_args()#done
-    
+    print("ARGS DONEEEE")
     writer = None
     initialize_distributed(args)#done
     if torch.distributed.get_rank() == 0:
