@@ -25,7 +25,7 @@ import torch.nn.functional as F
 import torch.nn.init as init
 from torch.nn.parameter import Parameter
 
-from apex.normalization.fused_layer_norm import FusedLayerNorm as LayerNorm
+# from apex.normalization.fused_layer_norm import FusedLayerNorm as LayerNorm
 
 from .initialize import get_model_parallel_rank
 from .initialize import get_model_parallel_world_size
@@ -329,5 +329,61 @@ class RowParallelLinear(torch.nn.Module):
             output = output_ + self.bias
         else:
             output = output_
+        return output
+
+
+class ParallelMLP(torch.nn.Module):
+    """MLP for XLNet.
+
+    MLP will take the input with h hidden state, project it to 4*h
+    hidden dimension, perform gelu transformation, and project the
+    state back into h hidden dimension. At the end, dropout is also
+    applied.
+
+    Arguments:
+        hidden_size: The hidden size of the self attention.
+        output_dropout_prob: dropout probability for the outputs
+                             after self attention and final output.
+        init_method: initialization method used for the weights. Note
+                     that all biases are initialized to zero and
+                     layernorm weight are initialized to one.
+        output_layer_init_method: output layer initialization. If None,
+                                  use `init_method`.
+    """
+# changed init method from a compulosory to optional arg
+    def __init__(self, hidden_size, output_dropout_prob, init_method=None,
+                 output_layer_init_method=None):
+        super(ParallelMLP, self).__init__()
+        # Set output layer initialization if not provided.
+        if output_layer_init_method is None:
+            output_layer_init_method = init_method
+        # Project to 4h.
+        self.dense_h_to_4h = ColumnParallelLinear(hidden_size, 4*hidden_size,
+                                                  gather_output=False,
+                                                  init_method=init_method)
+        # Project back to h.
+        self.dense_4h_to_h = RowParallelLinear(
+            4*hidden_size,
+            hidden_size,
+            input_is_parallel=True,
+            init_method=output_layer_init_method)
+        self.dropout = torch.nn.Dropout(output_dropout_prob)
+        self.relu = nn.ReLU(inplace=True)
+        print("h to 4h and 4h to h parallel MLP")
+
+    def forward(self, hidden_states):
+        # [b, s, 4hp]
+        
+        intermediate_parallel = self.dense_h_to_4h(hidden_states)
+        
+        ####added dropout here  and removed dropout on output changed act to relu
+        
+        intermediate_parallel = self.relu(intermediate_parallel)
+        intermediate_parallel = self.dropout(intermediate_parallel)
+
+        # [b, s, h]
+        output = self.dense_4h_to_h(intermediate_parallel)
+        
+        
         return output
 
