@@ -12,16 +12,16 @@ import os
 import mpu
 from mpu.layers import ColumnParallelLinear,RowParallelLinear,ParallelMLP
 def ddp_setup(model_parallel_size):
-    init_process_group(backend="nccl",world_size=1, rank=int(os.environ["LOCAL_RANK"]))
+    init_process_group(backend="nccl",world_size=2, rank=int(os.environ["LOCAL_RANK"]))
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
     print("get rank working",torch.distributed.get_rank() )
     print("is initialized workingv",torch.distributed.is_initialized())
     world_size = torch.distributed.get_world_size()
     device = int(os.environ["LOCAL_RANK"]) % torch.cuda.device_count()
     print("device=",device)
-    print("world size wokring",world_size)
+    print("world size wokring",world_size,"model prll size",model_parallel_size)
 
-    ranks = range(0, world_size, 1)
+    # ranks = range(1, world_size, 1)
     # print(*ranks)
     # group = torch.distributed.new_group([0])
     mpu.initialize_model_parallel(model_parallel_size)
@@ -47,7 +47,7 @@ class Trainer:
         #     print("Loading snapshot")
         #     self._load_snapshot(snapshot_path)
 
-        self.model = DDP(self.model, device_ids=[self.gpu_id])
+        # self.model = DDP(self.model, device_ids=[self.gpu_id])
 
     def _load_snapshot(self, snapshot_path):
         loc = f"cuda:{self.gpu_id}"
@@ -58,7 +58,9 @@ class Trainer:
 
     def _run_batch(self, source, targets):
         self.optimizer.zero_grad()
+        print("about to pass data to model")
         output = self.model(source)
+        print("forward pass done, now loass")
         loss = F.cross_entropy(output, targets)
         loss.backward()
         self.optimizer.step()
@@ -66,11 +68,16 @@ class Trainer:
     def _run_epoch(self, epoch):
         b_sz = len(next(iter(self.train_data))[0])
         print(f"[GPU{self.gpu_id}] Epoch {epoch} | Batchsize: {b_sz} | Steps: {len(self.train_data)}")
-        self.train_data.sampler.set_epoch(epoch)
+        # self.train_data.sampler.set_epoch(epoch)
         for source, targets in self.train_data:
             source = source.to(self.gpu_id)
+            print("SOURCE DATA SHAPOE",source.shape)
             targets = targets.to(self.gpu_id)
+            print("targets DATA SHAPOE",targets.shape)
+            # print(targets)
+            # exit()
             self._run_batch(source, targets)
+            # exit()
 
     def _save_snapshot(self, epoch):
         snapshot = {
@@ -90,8 +97,8 @@ class Trainer:
 def load_train_objs():
     train_set = MyTrainDataset(2048)  # load your dataset
 
-    model = torch.nn.Sequential(ParallelMLP(20,0.5),ColumnParallelLinear(20,1))
-    # model = ColumnParallelLinear(20,1)
+    model = torch.nn.Sequential(ParallelMLP(20,0.5),ColumnParallelLinear(20,2))
+    # model = ColumnParallelLinear(20,2)
     print(model)
     # model = torch.nn.Linear(20, 1)  # load your model
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
@@ -103,8 +110,8 @@ def prepare_dataloader(dataset: Dataset, batch_size: int):
         dataset,
         batch_size=batch_size,
         pin_memory=True,
-        shuffle=False,
-        sampler=DistributedSampler(dataset)
+        shuffle=False
+        # sampler=DistributedSampler(dataset)
     )
 
 
@@ -122,7 +129,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='simple distributed training job')
     parser.add_argument('total_epochs', type=int, help='Total epochs to train the model')
     parser.add_argument('save_every', type=int, help='How often to save a snapshot')
-    parser.add_argument('--model_parallel_size', default=1, type=int, help='Input batch size on each device (default: 32)')
+    parser.add_argument('--model_parallel_size', default=2, type=int, help='Input batch size on each device (default: 32)')
     
     parser.add_argument('--batch_size', default=32, type=int, help='Input batch size on each device (default: 32)')
     
