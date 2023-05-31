@@ -12,8 +12,8 @@ import os
 import mpu
 from mpu.layers import ColumnParallelLinear,RowParallelLinear,ParallelMLP,ParallelEmbedding
 os.environ['CUDA_VISIBLE_DEVICES']="0,1"
-def ddp_setup(model_parallel_size):
-    init_process_group(backend="nccl",world_size=2, rank=int(os.environ["LOCAL_RANK"]))
+def ddp_setup(world_size,model_parallel_size):
+    init_process_group(backend="nccl",world_size=world_size, rank=int(os.environ["LOCAL_RANK"]))
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
     print("get rank working",torch.distributed.get_rank() )
     print("is initialized workingv",torch.distributed.is_initialized())
@@ -118,8 +118,8 @@ def prepare_dataloader(dataset: Dataset, batch_size: int):
     )
 
 
-def main(model_parallel_size,save_every: int, total_epochs: int, batch_size: int, snapshot_path: str = "snapshot.pt"):
-    ddp_setup(model_parallel_size)
+def main(world_size,model_parallel_size,save_every: int, total_epochs: int, batch_size: int, snapshot_path: str = "snapshot.pt"):
+    ddp_setup(world_size,model_parallel_size)
     dataset, model, optimizer = load_train_objs()
     train_data = prepare_dataloader(dataset, batch_size)
     trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
@@ -132,10 +132,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='simple distributed training job')
     parser.add_argument('total_epochs', type=int, help='Total epochs to train the model')
     parser.add_argument('save_every', type=int, help='How often to save a snapshot')
-    parser.add_argument('--model_parallel_size', default=1, type=int, help='Input batch size on each device (default: 32)')
-    
+    parser.add_argument('--model_parallel_size', default=2, type=int, help='Input batch size on each device (default: 32)')
+    parser.add_argument('--world_size', default=2, type=int, help='Input batch size on each device (default: 32)')
     parser.add_argument('--batch_size', default=32, type=int, help='Input batch size on each device (default: 32)')
     
     args = parser.parse_args()
     
-    main(args.model_parallel_size,args.save_every, args.total_epochs, args.batch_size)
+    main(args.world_size,args.model_parallel_size,args.save_every, args.total_epochs, args.batch_size)
