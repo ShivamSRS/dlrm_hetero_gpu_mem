@@ -179,12 +179,16 @@ class ParallelEmbedding(torch.nn.Module):
             stride=1, return_master_weight=False)
 
     def forward(self, input_):
+        print("INSDIE PARALL EMBEDDING shape of input before",input_.shape)
         input_parallel = copy_to_model_parallel_region(input_)
+        print("INSDIE PARALL EMBEDDING shape of input after",input_.shape)
         output_parallel = F.embedding(input_parallel, self.weight,
                                       self.padding_idx, self.max_norm,
                                       self.norm_type, self.scale_grad_by_freq,
                                       self.sparse)
+        print("INSDIE PARALL EMBEDDING shape of op prll b4 gather",input_.shape)
         output = gather_from_model_parallel_region(output_parallel)
+        print("INSDIE PARALL EMBEDDING shape of op prll after gather",input_.shape)
         return output
 
 
@@ -335,7 +339,7 @@ class RowParallelLinear(torch.nn.Module):
         # All-reduce across all the partitions.
         output_ = reduce_from_model_parallel_region(output_parallel)
         print("all reduce is done",output_.shape)
-        exit()
+        # exit()
         if self.bias is not None:
             output = output_ + self.bias
         else:
@@ -398,6 +402,6 @@ class ParallelMLP(torch.nn.Module):
         # exit()
         output = self.dense_4h_to_h(intermediate_parallel)
         
-        print("out of inter layer 4h to h")
+        print("##############","out of inter layer 4h to h","#############",sep="\n")
         return output
 

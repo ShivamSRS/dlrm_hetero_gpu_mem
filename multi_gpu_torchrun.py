@@ -10,7 +10,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 import os
 import mpu
-from mpu.layers import ColumnParallelLinear,RowParallelLinear,ParallelMLP
+from mpu.layers import ColumnParallelLinear,RowParallelLinear,ParallelMLP,ParallelEmbedding
+os.environ['CUDA_VISIBLE_DEVICES']="0,1"
 def ddp_setup(model_parallel_size):
     init_process_group(backend="nccl",world_size=2, rank=int(os.environ["LOCAL_RANK"]))
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
@@ -60,7 +61,9 @@ class Trainer:
         self.optimizer.zero_grad()
         print("about to pass data to model")
         output = self.model(source)
-        print("forward pass done, now loass")
+        print("forward pass done, now loss")
+        print("#############")
+        # exit()
         loss = F.cross_entropy(output, targets)
         loss.backward()
         self.optimizer.step()
@@ -97,7 +100,7 @@ class Trainer:
 def load_train_objs():
     train_set = MyTrainDataset(2048)  # load your dataset
 
-    model = torch.nn.Sequential(ParallelMLP(20,0.5),ColumnParallelLinear(20,2))
+    model = torch.nn.Sequential(ParallelEmbedding(2000,20),ParallelMLP(20,0.5),ColumnParallelLinear(20,2))
     # model = ColumnParallelLinear(20,2)
     print(model)
     # model = torch.nn.Linear(20, 1)  # load your model
@@ -129,7 +132,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='simple distributed training job')
     parser.add_argument('total_epochs', type=int, help='Total epochs to train the model')
     parser.add_argument('save_every', type=int, help='How often to save a snapshot')
-    parser.add_argument('--model_parallel_size', default=2, type=int, help='Input batch size on each device (default: 32)')
+    parser.add_argument('--model_parallel_size', default=1, type=int, help='Input batch size on each device (default: 32)')
     
     parser.add_argument('--batch_size', default=32, type=int, help='Input batch size on each device (default: 32)')
     
