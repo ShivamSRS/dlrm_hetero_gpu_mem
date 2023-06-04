@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from fakedata import MyTrainDataset
-
+import time
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -96,6 +96,51 @@ class Trainer:
             if self.gpu_id == 0 and epoch % self.save_every == 0:
                 self._save_snapshot(epoch)
 
+    def train_epoch(self,epoch,max_epochs,trainer):
+        start_time = time.time()  # Start timing the epoch
+        rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        for batch_idx, (source, target) in enumerate(trainer.train_data):
+            batch_start_time = time.time()  # Start timing the batch
+
+            # Training code here
+            source = source.to(rank)
+            target = target.to(rank)
+            self._run_batch(source, target)
+
+            batch_end_time = time.time()  # End timing the batch
+            batch_time = batch_end_time - batch_start_time
+
+            # Synchronize across GPUs
+            torch.distributed.barrier()
+
+            # Gather batch timing information from all GPUs
+            batch_times = torch.tensor([batch_time], device=torch.device('cuda'))
+            torch.distributed.all_reduce(batch_times)
+            total_batch_time = batch_times.item()
+            # Print batch timing information for each GPU
+            print(f"GPU: {rank} | Epoch: {epoch+1}/{max_epochs} | Batch: {batch_idx+1}/{len(trainer.train_data)} | Batch Time: {total_batch_time:.4f}s")
+
+        avg_batch_time= total_batch_time / len(trainer.train_data)  # Calculate average batch time
+        print(f"avg batch time: {avg_batch_time:.4f}s")
+        end_time = time.time()  # End timing the epoch
+        epoch_time = end_time - start_time
+
+        # Synchronize across GPUs
+        torch.distributed.barrier()
+
+        # Gather epoch timing information from all GPUs
+        epoch_times = torch.tensor([epoch_time], device=torch.device('cuda'))
+        torch.distributed.all_reduce(epoch_times)
+        total_epoch_time = epoch_times.item()
+        # Print epoch timing information for each GPU
+        if rank == 0:
+            print(f"Epoch: {epoch+1}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
+
+        # Save snapshot
+        if rank == 0 and epoch % trainer.save_every == 0:
+            trainer._save_snapshot(epoch)
+
 
 def load_train_objs():
     train_set = MyTrainDataset(2048)  # load your dataset
@@ -105,7 +150,14 @@ def load_train_objs():
     print(model)
     # model = torch.nn.Linear(20, 1)  # load your model
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
-    return train_set, model, optimizer
+
+    # Compute the total sparse entries
+    total_indices = 2000  # Total number of indices in the tensor
+    total_sparse_indices = sum(1 for data in train_set if torch.any(data[0] == 0))
+    total_sparse_entries = total_sparse_indices / (train_set.size * total_indices)
+
+    print("Total sparse entries:", total_sparse_entries)
+    return train_set, model, optimizer,total_sparse_entries
 
 
 def prepare_dataloader(dataset: Dataset, batch_size: int):
@@ -120,11 +172,15 @@ def prepare_dataloader(dataset: Dataset, batch_size: int):
 
 def main(world_size,model_parallel_size,save_every: int, total_epochs: int, batch_size: int, snapshot_path: str = "snapshot.pt"):
     ddp_setup(world_size,model_parallel_size)
-    dataset, model, optimizer = load_train_objs()
+    dataset, model, optimizer,total_sparse_entries = load_train_objs()
     train_data = prepare_dataloader(dataset, batch_size)
     trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
-    trainer.train(total_epochs)
+    #trainer.train(total_epochs)
+    for epoch in range(trainer.epochs_run, total_epochs):
+        trainer.train_epoch(epoch + 1,total_epochs,trainer)  # Increment epoch by 1
+
     destroy_process_group()
+
 
 
 if __name__ == "__main__":
