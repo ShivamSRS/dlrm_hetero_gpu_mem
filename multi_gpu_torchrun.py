@@ -10,32 +10,36 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 import os
 import mpu
-from mpu.layers import ColumnParallelLinear,RowParallelLinear,ParallelMLP,ParallelEmbedding
-os.environ['CUDA_VISIBLE_DEVICES']="0,1"
-def ddp_setup(world_size,model_parallel_size):
-    init_process_group(backend="nccl",world_size=world_size, rank=int(os.environ["LOCAL_RANK"]))
+import model
+from mpu.layers import ColumnParallelLinear, RowParallelLinear, ParallelMLP, ParallelEmbedding
+
+os.environ['CUDA_VISIBLE_DEVICES'] = "0,1"
+
+
+def ddp_setup(world_size, model_parallel_size):
+    init_process_group(backend="nccl", world_size=world_size, rank=int(os.environ["LOCAL_RANK"]))
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
-    print("get rank working",torch.distributed.get_rank() )
-    print("is initialized workingv",torch.distributed.is_initialized())
+    # print("get rank working",torch.distributed.get_rank() )
+    # print("is initialized workingv",torch.distributed.is_initialized())
     world_size = torch.distributed.get_world_size()
     device = int(os.environ["LOCAL_RANK"]) % torch.cuda.device_count()
-    print("device=",device)
-    print("world size wokring",world_size,"model prll size",model_parallel_size)
+    # print("device=",device)
+    # print("world size wokring",world_size,"model prll size",model_parallel_size)
 
     # ranks = range(1, world_size, 1)
     # print(*ranks)
     # group = torch.distributed.new_group([0])
     mpu.initialize_model_parallel(model_parallel_size)
-    
+
 
 class Trainer:
     def __init__(
-        self,
-        model: torch.nn.Module,
-        train_data: DataLoader,
-        optimizer: torch.optim.Optimizer,
-        save_every: int,
-        snapshot_path: str,
+            self,
+            model: torch.nn.Module,
+            train_data: DataLoader,
+            optimizer: torch.optim.Optimizer,
+            save_every: int,
+            snapshot_path: str,
     ) -> None:
         self.gpu_id = int(os.environ["LOCAL_RANK"])
         self.model = model.to(self.gpu_id)
@@ -55,16 +59,17 @@ class Trainer:
         snapshot = torch.load(snapshot_path, map_location=loc)
         self.model.load_state_dict(snapshot["MODEL_STATE"])
         self.epochs_run = snapshot["EPOCHS_RUN"]
-        print(f"Resuming training from snapshot at Epoch {self.epochs_run}")
+        # print(f"Resuming training from snapshot at Epoch {self.epochs_run}")
 
     def _run_batch(self, source, targets):
         self.optimizer.zero_grad()
-        print("about to pass data to model")
+        # print("about to pass data to model")
         output = self.model(source)
-        print("forward pass done, now loss")
-        print("#############")
+        # print(f"forward pass done, now loss.") #source: {source}, target: {targets}")
+        # print("#############")
         # exit()
         loss = F.cross_entropy(output, targets)
+        print(f"Loss:{loss}")
         loss.backward()
         self.optimizer.step()
 
@@ -74,9 +79,9 @@ class Trainer:
         # self.train_data.sampler.set_epoch(epoch)
         for source, targets in self.train_data:
             source = source.to(self.gpu_id)
-            print("SOURCE DATA SHAPOE",source.shape)
+            # print("SOURCE DATA SHAPOE",source.shape)
             targets = targets.to(self.gpu_id)
-            print("targets DATA SHAPOE",targets.shape)
+            # print("targets DATA SHAPOE",targets.shape)
             # print(targets)
             # exit()
             self._run_batch(source, targets)
@@ -84,7 +89,7 @@ class Trainer:
 
     def _save_snapshot(self, epoch):
         snapshot = {
-            "MODEL_STATE": self.model.module.state_dict(),
+            "MODEL_STATE": self.model.state_dict(),  # .modules.state_dict(),
             "EPOCHS_RUN": epoch,
         }
         torch.save(snapshot, self.snapshot_path)
@@ -96,21 +101,22 @@ class Trainer:
             if self.gpu_id == 0 and epoch % self.save_every == 0:
                 self._save_snapshot(epoch)
 
-    def train_epoch(self,epoch,max_epochs,trainer):
+    def train_epoch(self, epoch, max_epochs, trainer):
         start_time = time.time()  # Start timing the epoch
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
         for batch_idx, (source, target) in enumerate(trainer.train_data):
             batch_start_time = time.time()  # Start timing the batch
-
+            # print(f"batch start time: {batch_start_time:.4f}s")
             # Training code here
             source = source.to(rank)
             target = target.to(rank)
+            # print("run batch called")
             self._run_batch(source, target)
-
+            # print("run batch exited")
             batch_end_time = time.time()  # End timing the batch
             batch_time = batch_end_time - batch_start_time
-
+            # print(f"batch time:{batch_time}")
             # Synchronize across GPUs
             torch.distributed.barrier()
 
@@ -119,9 +125,10 @@ class Trainer:
             torch.distributed.all_reduce(batch_times)
             total_batch_time = batch_times.item()
             # Print batch timing information for each GPU
-            print(f"GPU: {rank} | Epoch: {epoch+1}/{max_epochs} | Batch: {batch_idx+1}/{len(trainer.train_data)} | Batch Time: {total_batch_time:.4f}s")
+            print(
+                f"GPU: {rank} | Epoch: {epoch}/{max_epochs} | Batch: {batch_idx + 1}/{len(trainer.train_data)} | Batch Time: {total_batch_time:.4f}s")
 
-        avg_batch_time= total_batch_time / len(trainer.train_data)  # Calculate average batch time
+        avg_batch_time = total_batch_time / len(trainer.train_data)  # Calculate average batch time
         print(f"avg batch time: {avg_batch_time:.4f}s")
         end_time = time.time()  # End timing the epoch
         epoch_time = end_time - start_time
@@ -135,7 +142,7 @@ class Trainer:
         total_epoch_time = epoch_times.item()
         # Print epoch timing information for each GPU
         if rank == 0:
-            print(f"Epoch: {epoch+1}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
+            print(f"Epoch: {epoch + 1}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
 
         # Save snapshot
         if rank == 0 and epoch % trainer.save_every == 0:
@@ -145,7 +152,7 @@ class Trainer:
 def load_train_objs():
     train_set = MyTrainDataset(2048)  # load your dataset
 
-    model = torch.nn.Sequential(ParallelEmbedding(2000,20),ParallelMLP(20,0.5),ColumnParallelLinear(20,2))
+    model = torch.nn.Sequential(ParallelEmbedding(2000, 20), ParallelMLP(20, 0.5), ColumnParallelLinear(20, 2))
     # model = ColumnParallelLinear(20,2)
     print(model)
     # model = torch.nn.Linear(20, 1)  # load your model
@@ -157,7 +164,7 @@ def load_train_objs():
     total_sparse_entries = total_sparse_indices / (train_set.size * total_indices)
 
     print("Total sparse entries:", total_sparse_entries)
-    return train_set, model, optimizer,total_sparse_entries
+    return train_set, model, optimizer, total_sparse_entries
 
 
 def prepare_dataloader(dataset: Dataset, batch_size: int):
@@ -170,28 +177,30 @@ def prepare_dataloader(dataset: Dataset, batch_size: int):
     )
 
 
-def main(world_size,model_parallel_size,save_every: int, total_epochs: int, batch_size: int, snapshot_path: str = "snapshot.pt"):
-    ddp_setup(world_size,model_parallel_size)
-    dataset, model, optimizer,total_sparse_entries = load_train_objs()
+def main(world_size, model_parallel_size, save_every: int, total_epochs: int, batch_size: int,
+         snapshot_path: str = "snapshot.pt"):
+    ddp_setup(world_size, model_parallel_size)
+    dataset, model, optimizer, total_sparse_entries = load_train_objs()
     train_data = prepare_dataloader(dataset, batch_size)
     trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
-    #trainer.train(total_epochs)
+    # trainer.train(total_epochs)
     for epoch in range(trainer.epochs_run, total_epochs):
-        trainer.train_epoch(epoch + 1,total_epochs,trainer)  # Increment epoch by 1
+        trainer.train_epoch(epoch + 1, total_epochs, trainer)  # Increment epoch by 1
 
     destroy_process_group()
 
 
-
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description='simple distributed training job')
     parser.add_argument('total_epochs', type=int, help='Total epochs to train the model')
     parser.add_argument('save_every', type=int, help='How often to save a snapshot')
-    parser.add_argument('--model_parallel_size', default=2, type=int, help='Input batch size on each device (default: 32)')
+    parser.add_argument('--model_parallel_size', default=2, type=int,
+                        help='Input batch size on each device (default: 32)')
     parser.add_argument('--world_size', default=2, type=int, help='Input batch size on each device (default: 32)')
     parser.add_argument('--batch_size', default=32, type=int, help='Input batch size on each device (default: 32)')
-    
+
     args = parser.parse_args()
-    
-    main(args.world_size,args.model_parallel_size,args.save_every, args.total_epochs, args.batch_size)
+
+    main(args.world_size, args.model_parallel_size, args.save_every, args.total_epochs, args.batch_size)

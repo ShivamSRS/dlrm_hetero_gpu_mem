@@ -74,7 +74,7 @@ def initialize_model_parallel(model_parallel_size_):
     for i in range(world_size // model_parallel_size):
         ranks = range(i * model_parallel_size,
                       (i + 1) * model_parallel_size)
-        print("RANSKSSSS",ranks)
+        #print("RANSKSSSS",ranks)
         group = torch.distributed.new_group(ranks)
         if i == (rank // model_parallel_size):
             _MODEL_PARALLEL_GROUP = group
@@ -92,7 +92,7 @@ def get_model_parallel_group():
     """Get the model parallel group the caller rank belongs to."""
     assert _MODEL_PARALLEL_GROUP is not None, \
         'model parallel group is not initialized'
-    print("inside initalziae .py",_MODEL_PARALLEL_GROUP)
+    #print("inside initalziae .py",_MODEL_PARALLEL_GROUP)
     return _MODEL_PARALLEL_GROUP
 
 

@@ -23,7 +23,7 @@ def _reduce(input_):
     """All-reduce the the input tensor across model parallel group."""
     group = get_model_parallel_group()
 
-    print("inside reduce,grp is",group,"input is",input_.shape)
+    #print("inside reduce,grp is",group,"input is",input_.shape)
     # Bypass the function if we are using only 1 GPU.
     if torch.distributed.get_world_size(group=group) == 1:
         return input_
@@ -94,7 +94,7 @@ class _ReduceFromModelParallelRegion(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input_):
-        print("INSIDE REDUCE")
+        #print("INSIDE REDUCE")
         return _reduce(input_)
 
     @staticmethod
