@@ -48,8 +48,8 @@ def initialize_model_parallel(model_parallel_size_):
     """
     
     if torch.distributed.get_rank() == 0:
-        print('> initializing model parallel with size {}'.format(
-            model_parallel_size_))
+        pass
+        #print('> initializing model parallel with size {}'.format(model_parallel_size_))
     # Get world size and rank. Ensure some consistencies.
     assert torch.distributed.is_initialized()
     world_size = torch.distributed.get_world_size()
