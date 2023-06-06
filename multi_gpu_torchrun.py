@@ -129,7 +129,7 @@ class Trainer:
                 f"GPU: {rank} | Epoch: {epoch}/{max_epochs} | Batch: {batch_idx + 1}/{len(trainer.train_data)} | Batch Time: {total_batch_time:.4f}s")
 
         avg_batch_time = total_batch_time / len(trainer.train_data)  # Calculate average batch time
-        print(f"avg batch time: {avg_batch_time:.4f}s")
+        print(f"avg batch time: {avg_batch_time:.6f}s")
         end_time = time.time()  # End timing the epoch
         epoch_time = end_time - start_time
 
