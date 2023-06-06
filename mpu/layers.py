@@ -179,16 +179,16 @@ class ParallelEmbedding(torch.nn.Module):
             stride=1, return_master_weight=False)
 
     def forward(self, input_):
-        print("INSDIE PARALL EMBEDDING shape of input before",input_.shape)
+        #print("INSDIE PARALL EMBEDDING shape of input before",input_.shape)
         input_parallel = copy_to_model_parallel_region(input_)
-        print("INSDIE PARALL EMBEDDING shape of input after",input_.shape)
+        #print("INSDIE PARALL EMBEDDING shape of input after",input_.shape)
         output_parallel = F.embedding(input_parallel, self.weight,
                                       self.padding_idx, self.max_norm,
                                       self.norm_type, self.scale_grad_by_freq,
                                       self.sparse)
-        print("INSDIE PARALL EMBEDDING shape of op prll b4 gather",input_.shape)
+        #print("INSDIE PARALL EMBEDDING shape of op prll b4 gather",input_.shape)
         output = gather_from_model_parallel_region(output_parallel)
-        print("INSDIE PARALL EMBEDDING shape of op prll after gather",input_.shape)
+        #print("INSDIE PARALL EMBEDDING shape of op prll after gather",input_.shape)
         return output
 
 
@@ -248,9 +248,9 @@ class ColumnParallelLinear(torch.nn.Module):
 
     def forward(self, input_):
         # Set up backprop all-reduce.
-        print("INSDIE COLMPRLL b4 cpying",input_.shape)
+        #print("INSDIE COLMPRLL b4 cpying",input_.shape)
         input_parallel = copy_to_model_parallel_region(input_)
-        print("INSDIE COLMPRLL after cpying",input_parallel.shape)
+        #print("INSDIE COLMPRLL after cpying",input_parallel.shape)
         # exit()
         # Matrix multiply.
         output_parallel = F.linear(input_parallel, self.weight, self.bias)
@@ -326,19 +326,19 @@ class RowParallelLinear(torch.nn.Module):
         # Set up backprop all-reduce.
         
         if self.input_is_parallel:
-            print("input is prll",input_.shape)
+            #print("input is prll",input_.shape)
             input_parallel = input_
         else:
-            print("make it parallel",input_.shape)
+            #print("make it parallel",input_.shape)
             input_parallel = scatter_to_model_parallel_region(input_)
         # Matrix multiply.
-        print("matrix mul in rowparallel",input_parallel.shape,self.weight.shape)
+        #print("matrix mul in rowparallel",input_parallel.shape,self.weight.shape)
         output_parallel = F.linear(input_parallel, self.weight)
-        print("now all reduce ",output_parallel.shape)
+        #print("now all reduce ",output_parallel.shape)
         # exit()
         # All-reduce across all the partitions.
         output_ = reduce_from_model_parallel_region(output_parallel)
-        print("all reduce is done",output_.shape)
+        #print("all reduce is done",output_.shape)
         # exit()
         if self.bias is not None:
             output = output_ + self.bias
@@ -384,24 +384,24 @@ class ParallelMLP(torch.nn.Module):
             init_method=output_layer_init_method)
         self.dropout = torch.nn.Dropout(output_dropout_prob)
         self.relu = nn.ReLU(inplace=True)
-        print("h to 4h and 4h to h parallel MLP")
+        #print("h to 4h and 4h to h parallel MLP")
 
     def forward(self, hidden_states):
         # [b, s, 4hp]
-        print("going to inter layer h to 4h",hidden_states.shape)
+        #print("going to inter layer h to 4h",hidden_states.shape)
         intermediate_parallel = self.dense_h_to_4h(hidden_states)
-        print("out of inter layer h to 4h")
+        #print("out of inter layer h to 4h")
         ####added dropout here  and removed dropout on output changed act to relu
-        print("going to relu")
+        #print("going to relu")
         intermediate_parallel = self.relu(intermediate_parallel)
-        print("out of relu")
-        print("going to dropout")
+        #print("out of relu")
+        #print("going to dropout")
         intermediate_parallel = self.dropout(intermediate_parallel)
-        print("out of dropout going to layer  4h to h")
+        #print("out of dropout going to layer  4h to h")
         # [b, s, h]
         # exit()
         output = self.dense_4h_to_h(intermediate_parallel)
         
-        print("##############","out of inter layer 4h to h","#############",sep="\n")
+        #print("##############","out of inter layer 4h to h","#############",sep="\n")
         return output
 
