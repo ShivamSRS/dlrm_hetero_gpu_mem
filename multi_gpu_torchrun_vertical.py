@@ -12,6 +12,7 @@ import os
 import mpu
 import model
 from mpu.layers import ColumnParallelLinear, RowParallelLinear, ParallelMLP, ParallelEmbedding
+from torch.profiler import profile, record_function, ProfilerActivity
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0,1"
 
@@ -176,9 +177,13 @@ def main(world_size, model_parallel_size, save_every: int, total_epochs: int, ba
     ddp_setup(world_size, model_parallel_size)
     dataset, model, optimizer, total_sparse_entries = load_train_objs()
     train_data = prepare_dataloader(dataset, batch_size)
-    trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
-    trainer.train(total_epochs,trainer)
-    destroy_process_group()
+    with profile(activities=[ProfilerActivity.CPU,ProfilerActivity.CUDA], record_shapes=True, profile_memory=True) as prof:
+        trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
+        trainer.train(total_epochs,trainer)
+        destroy_process_group()
+    print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=10))
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    print(prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10))
 
 
 if __name__ == "__main__":
