@@ -63,13 +63,40 @@ class Trainer:
         loss.backward()
         self.optimizer.step()
 
-    def _run_epoch(self, epoch):
+    def _run_epoch(self, epoch, max_epochs, trainer, start_time):
         b_sz = len(next(iter(self.train_data))[0])
         print(f"[GPU{self.gpu_id}] Epoch {epoch} | Batchsize: {b_sz} | Steps: {len(self.train_data)}")
-        for source, targets in self.train_data:
+        rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        total_batch_time = 0.0
+
+        for batch_idx, (source, targets) in enumerate(self.train_data):
             source = source.to(self.gpu_id)
             targets = targets.to(self.gpu_id)
             self._run_batch(source, targets)
+
+            if rank == 0:
+                batch_start_time = time.time()
+            torch.distributed.barrier()
+            if rank == 0:
+                batch_end_time = time.time()
+                total_batch_time = batch_end_time - batch_start_time
+                print(
+                    f"GPU: {rank} | Epoch: {epoch}/{max_epochs} | Batch: {batch_idx + 1}/{len(self.train_data)} | Batch Time: {total_batch_time:.4f}s")
+            torch.distributed.barrier()
+
+        avg_batch_time = total_batch_time / len(self.train_data)
+        print(f"avg batch time: {avg_batch_time:.6f}s")
+        end_time = time.time()
+        epoch_time = end_time - start_time
+        torch.distributed.barrier()
+        epoch_times = torch.tensor([epoch_time], device=torch.device('cuda'))
+        torch.distributed.all_reduce(epoch_times)
+        total_epoch_time = epoch_times.item()
+        if rank == 0:
+            print(f"Epoch: {epoch + 1}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
+        if rank == 0 and epoch % trainer.save_every == 0:
+            trainer._save_snapshot(epoch)
 
     def _save_snapshot(self, epoch):
         snapshot = {
@@ -80,8 +107,9 @@ class Trainer:
         print(f"Epoch {epoch} | Training snapshot saved at {self.snapshot_path}")
 
     def train(self, max_epochs: int):
+        start_time = time.time()
         for epoch in range(self.epochs_run, max_epochs):
-            self._run_epoch(epoch)
+            self._run_epoch(epoch,max_epochs, start_time)
             if self.gpu_id == 0 and epoch % self.save_every == 0:
                 self._save_snapshot(epoch)
 
@@ -100,8 +128,10 @@ class Trainer:
             batch_times = torch.tensor([batch_time], device=torch.device('cuda'))
             torch.distributed.all_reduce(batch_times)
             total_batch_time = batch_times.item()
-            print(
-                f"GPU: {rank} | Epoch: {epoch}/{max_epochs} | Batch: {batch_idx + 1}/{len(trainer.train_data)} | Batch Time: {total_batch_time:.4f}s")
+            if rank == 0:
+                print(
+                    f"GPU: {rank} | Epoch: {epoch}/{max_epochs} | Batch: {batch_idx + 1}/{len(trainer.train_data)} | Batch Time: {total_batch_time:.4f}s")
+            torch.distributed.barrier()
 
         avg_batch_time = total_batch_time / len(trainer.train_data)
         print(f"avg batch time: {avg_batch_time:.6f}s")
@@ -154,7 +184,7 @@ def main(world_size, model_parallel_size, save_every: int, total_epochs: int, ba
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='simple distributed training job')
+    parser = argparse.ArgumentParser(description='vertical distributed training job')
     parser.add_argument('total_epochs', type=int, help='Total epochs to train the model')
     parser.add_argument('save_every', type=int, help='How often to save a snapshot')
     parser.add_argument('--model_parallel_size', default=2, type=int,
