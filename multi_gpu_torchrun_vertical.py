@@ -106,10 +106,10 @@ class Trainer:
         torch.save(snapshot, self.snapshot_path)
         print(f"Epoch {epoch} | Training snapshot saved at {self.snapshot_path}")
 
-    def train(self, max_epochs: int):
+    def train(self, max_epochs: int,trainer):
         start_time = time.time()
         for epoch in range(self.epochs_run, max_epochs):
-            self._run_epoch(epoch,max_epochs, start_time)
+            self._run_epoch(epoch,max_epochs,trainer, start_time)
             if self.gpu_id == 0 and epoch % self.save_every == 0:
                 self._save_snapshot(epoch)
 
@@ -177,7 +177,7 @@ def main(world_size, model_parallel_size, save_every: int, total_epochs: int, ba
     dataset, model, optimizer, total_sparse_entries = load_train_objs()
     train_data = prepare_dataloader(dataset, batch_size)
     trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
-    trainer.train(total_epochs)
+    trainer.train(total_epochs,trainer)
     destroy_process_group()
 
 
