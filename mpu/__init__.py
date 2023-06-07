@@ -43,7 +43,9 @@ from .layers import ColumnParallelLinear
 from .layers import ParallelEmbedding
 from .layers import RowParallelLinear
 from .layers import VocabParallelEmbedding
-
+from .layers import PipeParallelEmbedding
+from .layers import Linear_GPU_to_CPU
+from .layers import Linear_GPU_to_GPU
 from .mappings import copy_to_model_parallel_region
 from .mappings import gather_from_model_parallel_region
 from .mappings import reduce_from_model_parallel_region

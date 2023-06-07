@@ -12,6 +12,7 @@ import os
 import mpu
 import model
 from mpu.layers import ColumnParallelLinear, RowParallelLinear, ParallelMLP, ParallelEmbedding
+from torch.profiler import profile, record_function, ProfilerActivity
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0,1"
 
@@ -44,6 +45,7 @@ class Trainer:
         self.optimizer.zero_grad()
         output = self.model(source)
         loss = F.cross_entropy(output, targets)
+        print(f"Loss: {loss}")
         loss.backward()
         self.optimizer.step()
 
@@ -89,7 +91,7 @@ class Trainer:
         total_epoch_time = epoch_times.item()
         # Print epoch timing information for each GPU
         if rank == 0:
-            print(f"Epoch: {epoch + 1}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
+            print(f"Epoch: {epoch}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
 
         if rank == 0 and epoch % self.save_every == 0:
             self._save_snapshot(epoch)
@@ -123,11 +125,15 @@ def main(world_size, model_parallel_size, save_every: int, total_epochs: int, ba
     ddp_setup(world_size, model_parallel_size)
     dataset, model, optimizer, total_sparse_entries = load_train_objs()
     train_data = prepare_dataloader(dataset, batch_size)
-    trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
-    for epoch in range(trainer.epochs_run, total_epochs):
-        trainer.train_epoch(epoch + 1, total_epochs)
-
-    destroy_process_group()
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
+                 profile_memory=True) as prof:
+        trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
+        for epoch in range(trainer.epochs_run, total_epochs):
+            trainer.train_epoch(epoch + 1, total_epochs)
+        destroy_process_group()
+    print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=10))
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    print(prof.key_averages(group_by_input_shape=True).table(sort_by="self_cuda_memory_usage", row_limit=10))
 
 
 if __name__ == "__main__":

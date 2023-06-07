@@ -50,7 +50,7 @@ def _initialize_affine_weight(weight, output_size, input_size,
     world_size = get_model_parallel_world_size()
     if world_size == 1:
         if init_method is None:
-            init_method=init.xavier_normal_
+            init_method = init.xavier_normal_
         init_method(weight)
         if return_master_weight:
             return weight
@@ -61,10 +61,9 @@ def _initialize_affine_weight(weight, output_size, input_size,
                                 dtype=weight.dtype,
                                 requires_grad=False)
     if init_method is None:
-        init_method=init.xavier_normal_
-        
+        init_method = init.xavier_normal_
+
     init_method(master_weight)
-    
 
     # Split and copy
     per_partition_per_stride_size = divide(per_partition_size, stride)
@@ -90,6 +89,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         embedding_dim: size of hidden state.
         init_method: method to initialize weights.
     """
+
     def __init__(self, num_embeddings, embedding_dim,
                  init_method=init.xavier_normal_):
         super(VocabParallelEmbedding, self).__init__()
@@ -139,6 +139,143 @@ class VocabParallelEmbedding(torch.nn.Module):
         return output
 
 
+class PipeParallelEmbedding(torch.nn.Module):
+    def __init__(self, num_embeddings, embedding_dim,
+                 init_method=init.xavier_normal_,
+                 keep_master_weight_for_test=False):
+        super(PipeParallelEmbedding, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.padding_idx = None
+        self.max_norm = None
+        self.norm_type = 2.
+        self.scale_grad_by_freq = False
+        self.sparse = False
+        self._weight = None
+
+        self.embedding_dim_per_partition = self.embedding_dim
+
+        if torch.distributed.get_rank() == 0:  # Store on GPU 0, if process rank is 0
+            self.weight = Parameter(torch.Tensor(self.num_embeddings, self.embedding_dim_per_partition).cuda(0))
+        else:
+            self.register_parameter('weight', None)
+
+        self.weight.model_parallel = False
+
+        if torch.distributed.get_rank() == 0:  # Initialize on GPU 0, if process rank is 0
+            _initialize_affine_weight(
+                self.weight, self.num_embeddings, self.embedding_dim,
+                self.embedding_dim_per_partition, 1, init_method,
+                stride=1, return_master_weight=False)
+
+    def forward(self, input_):
+        input_ = input_.to(torch.device('cuda:0'))  # Move input to GPU 0
+        output = F.embedding(input_, self.weight,
+                             self.padding_idx, self.max_norm,
+                             self.norm_type, self.scale_grad_by_freq,
+                             self.sparse)
+        output = output.to(torch.device('cuda:1'))  # Move output to GPU 1
+        return output
+
+class Linear_GPU_to_GPU(torch.nn.Module):
+    """Linear layer with column parallelism.
+
+    The linear layer is defined as Y = XA + b. A is parallelized along
+    its second dimension as A = [A_1, ..., A_p].
+
+    Arguments:
+        input_size: first dimension of matrix A.
+        output_size: second dimension of matrix A.
+        bias: If true, add bias
+        gather_output: If true, call all-gether on output and make Y avaiable
+                       to all GPUs, otherwise, every GPU will have its output
+                       which is Y_i = XA_i
+        init_method: method to initialize weights. Note that bias is always set
+                     to zero.
+        stride: For the strided linear layers.
+        keep_master_weight_for_test: This was added for testing and should be
+                                     set to False. It returns the master weights
+                                     used for initialization.
+    """
+
+    def __init__(self, input_size, output_size, bias=True, gather_output=True,
+                 init_method=init.xavier_normal_, stride=1,
+                 keep_master_weight_for_test=False, from_gpu=0,to_gpu=1):
+        super(Linear_GPU_to_GPU, self).__init__()
+
+        # Keep input parameters
+        self.input_size = input_size
+        self.output_size = output_size
+        self.gather_output = gather_output
+
+        self.weight = Parameter(torch.Tensor(self.output_size,
+                                             self.input_size))
+        self.weight.model_parallel = False
+        if torch.distributed.get_rank() == from_gpu:
+            self.weight = Parameter(torch.Tensor(self.weight).cuda(from_gpu))
+        else:
+            self.register_parameter('weight', None)
+        if bias and torch.distributed.get_rank() == from_gpu:
+            self.bias = Parameter(torch.Tensor(self.output_size)).cuda(from_gpu)
+            self.bias.model_parallel = False
+            # Always initialize bias to zero.
+            with torch.no_grad():
+                self.bias.zero_()
+        else:
+            self.register_parameter('bias', None)
+        if torch.distributed.get_rank() == from_gpu:
+            # Initialize weight.
+            self.master_weight = _initialize_affine_weight(
+                self.weight, self.output_size, self.input_size,
+                self.output_size, 0, init_method,
+                stride=stride, return_master_weight=keep_master_weight_for_test)
+
+    def forward(self, input_,from_gpu=0,to_gpu=1):
+        input_ = input_.to(torch.device(f"cuda:{from_gpu}"))  # Move input to GPU 0
+        output = F.linear(input_, self.weight, self.bias)
+        output = output.to(torch.device(f"cuda:{to_gpu}"))  # Move output to GPU 1
+        return output
+
+class Linear_GPU_to_CPU(torch.nn.Module):
+
+    def __init__(self, input_size, output_size, bias=True, gather_output=True,
+                 init_method=init.xavier_normal_, stride=1,
+                 keep_master_weight_for_test=False,from_gpu=1):
+        super(Linear_GPU_to_CPU, self).__init__()
+
+        # Keep input parameters
+        self.input_size = input_size
+        self.output_size = output_size
+        self.gather_output = gather_output
+
+        self.weight = Parameter(torch.Tensor(self.output_size,
+                                             self.input_size))
+        self.weight.model_parallel = False
+        if torch.distributed.get_rank() == from_gpu:
+            self.weight = Parameter(torch.Tensor(self.weight).cuda(from_gpu))
+        else:
+            self.register_parameter('weight', None)
+        if bias and torch.distributed.get_rank() == from_gpu:
+            self.bias = Parameter(torch.Tensor(self.output_size)).cuda(from_gpu)
+            self.bias.model_parallel = False
+            # Always initialize bias to zero.
+            with torch.no_grad():
+                self.bias.zero_()
+        else:
+            self.register_parameter('bias', None)
+        if torch.distributed.get_rank() == from_gpu:
+            # Initialize weight.
+            self.master_weight = _initialize_affine_weight(
+                self.weight, self.output_size, self.input_size,
+                self.output_size, 0, init_method,
+                stride=stride, return_master_weight=keep_master_weight_for_test)
+
+    def forward(self, input_,from_gpu=1):
+        input_ = input_.to(torch.device(f"cuda:{from_gpu}"))  # Move input to GPU 0
+        output = F.linear(input_, self.weight, self.bias)
+        output = output.to(torch.device('cpu'))  # Move output to GPU 1
+        return output
+
 class ParallelEmbedding(torch.nn.Module):
     """Embedding parallelized in the embedding dimension.
 
@@ -149,6 +286,7 @@ class ParallelEmbedding(torch.nn.Module):
         embedding_dim: size of hidden state.
         init_method: method to initialize weights.
     """
+
     def __init__(self, num_embeddings, embedding_dim,
                  init_method=init.xavier_normal_,
                  keep_master_weight_for_test=False):
@@ -179,16 +317,16 @@ class ParallelEmbedding(torch.nn.Module):
             stride=1, return_master_weight=False)
 
     def forward(self, input_):
-        #print("INSDIE PARALL EMBEDDING shape of input before",input_.shape)
+        # print("INSDIE PARALL EMBEDDING shape of input before",input_.shape)
         input_parallel = copy_to_model_parallel_region(input_)
-        #print("INSDIE PARALL EMBEDDING shape of input after",input_.shape)
+        # print("INSDIE PARALL EMBEDDING shape of input after",input_.shape)
         output_parallel = F.embedding(input_parallel, self.weight,
                                       self.padding_idx, self.max_norm,
                                       self.norm_type, self.scale_grad_by_freq,
                                       self.sparse)
-        #print("INSDIE PARALL EMBEDDING shape of op prll b4 gather",input_.shape)
+        # print("INSDIE PARALL EMBEDDING shape of op prll b4 gather",input_.shape)
         output = gather_from_model_parallel_region(output_parallel)
-        #print("INSDIE PARALL EMBEDDING shape of op prll after gather",input_.shape)
+        # print("INSDIE PARALL EMBEDDING shape of op prll after gather",input_.shape)
         return output
 
 
@@ -212,6 +350,7 @@ class ColumnParallelLinear(torch.nn.Module):
                                      set to False. It returns the master weights
                                      used for initialization.
     """
+
     def __init__(self, input_size, output_size, bias=True, gather_output=True,
                  init_method=init.xavier_normal_, stride=1,
                  keep_master_weight_for_test=False):
@@ -248,9 +387,9 @@ class ColumnParallelLinear(torch.nn.Module):
 
     def forward(self, input_):
         # Set up backprop all-reduce.
-        #print("INSDIE COLMPRLL b4 cpying",input_.shape)
+        # print("INSDIE COLMPRLL b4 cpying",input_.shape)
         input_parallel = copy_to_model_parallel_region(input_)
-        #print("INSDIE COLMPRLL after cpying",input_parallel.shape)
+        # print("INSDIE COLMPRLL after cpying",input_parallel.shape)
         # exit()
         # Matrix multiply.
         output_parallel = F.linear(input_parallel, self.weight, self.bias)
@@ -288,6 +427,7 @@ class RowParallelLinear(torch.nn.Module):
                                      set to False. It returns the master weights
                                      used for initialization.
     """
+
     def __init__(self, input_size, output_size, bias=True,
                  input_is_parallel=False,
                  init_method=init.xavier_normal_, stride=1,
@@ -324,21 +464,21 @@ class RowParallelLinear(torch.nn.Module):
 
     def forward(self, input_):
         # Set up backprop all-reduce.
-        
+
         if self.input_is_parallel:
-            #print("input is prll",input_.shape)
+            # print("input is prll",input_.shape)
             input_parallel = input_
         else:
-            #print("make it parallel",input_.shape)
+            # print("make it parallel",input_.shape)
             input_parallel = scatter_to_model_parallel_region(input_)
         # Matrix multiply.
-        #print("matrix mul in rowparallel",input_parallel.shape,self.weight.shape)
+        # print("matrix mul in rowparallel",input_parallel.shape,self.weight.shape)
         output_parallel = F.linear(input_parallel, self.weight)
-        #print("now all reduce ",output_parallel.shape)
+        # print("now all reduce ",output_parallel.shape)
         # exit()
         # All-reduce across all the partitions.
         output_ = reduce_from_model_parallel_region(output_parallel)
-        #print("all reduce is done",output_.shape)
+        # print("all reduce is done",output_.shape)
         # exit()
         if self.bias is not None:
             output = output_ + self.bias
@@ -365,7 +505,8 @@ class ParallelMLP(torch.nn.Module):
         output_layer_init_method: output layer initialization. If None,
                                   use `init_method`.
     """
-# changed init method from a compulosory to optional arg
+
+    # changed init method from a compulosory to optional arg
     def __init__(self, hidden_size, output_dropout_prob, init_method=None,
                  output_layer_init_method=None):
         super(ParallelMLP, self).__init__()
@@ -373,35 +514,34 @@ class ParallelMLP(torch.nn.Module):
         if output_layer_init_method is None:
             output_layer_init_method = init_method
         # Project to 4h.
-        self.dense_h_to_4h = ColumnParallelLinear(hidden_size, 4*hidden_size,
+        self.dense_h_to_4h = ColumnParallelLinear(hidden_size, 4 * hidden_size,
                                                   gather_output=False,
                                                   init_method=init_method)
         # Project back to h.
         self.dense_4h_to_h = RowParallelLinear(
-            4*hidden_size,
+            4 * hidden_size,
             hidden_size,
             input_is_parallel=True,
             init_method=output_layer_init_method)
         self.dropout = torch.nn.Dropout(output_dropout_prob)
         self.relu = nn.ReLU(inplace=True)
-        #print("h to 4h and 4h to h parallel MLP")
+        # print("h to 4h and 4h to h parallel MLP")
 
     def forward(self, hidden_states):
         # [b, s, 4hp]
-        #print("going to inter layer h to 4h",hidden_states.shape)
+        # print("going to inter layer h to 4h",hidden_states.shape)
         intermediate_parallel = self.dense_h_to_4h(hidden_states)
-        #print("out of inter layer h to 4h")
+        # print("out of inter layer h to 4h")
         ####added dropout here  and removed dropout on output changed act to relu
-        #print("going to relu")
+        # print("going to relu")
         intermediate_parallel = self.relu(intermediate_parallel)
-        #print("out of relu")
-        #print("going to dropout")
+        # print("out of relu")
+        # print("going to dropout")
         intermediate_parallel = self.dropout(intermediate_parallel)
-        #print("out of dropout going to layer  4h to h")
+        # print("out of dropout going to layer  4h to h")
         # [b, s, h]
         # exit()
         output = self.dense_4h_to_h(intermediate_parallel)
-        
-        #print("##############","out of inter layer 4h to h","#############",sep="\n")
-        return output
 
+        # print("##############","out of inter layer 4h to h","#############",sep="\n")
+        return output

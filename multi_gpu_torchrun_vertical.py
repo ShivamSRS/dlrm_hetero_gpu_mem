@@ -11,7 +11,8 @@ from torch.distributed import init_process_group, destroy_process_group
 import os
 import mpu
 import model
-from mpu.layers import ColumnParallelLinear, RowParallelLinear, ParallelMLP, ParallelEmbedding
+from mpu.layers import ColumnParallelLinear, RowParallelLinear, ParallelMLP, ParallelEmbedding,PipeParallelEmbedding,Linear_GPU_to_GPU,Linear_GPU_to_CPU
+from torch.profiler import profile, record_function, ProfilerActivity
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0,1"
 
@@ -26,15 +27,27 @@ class VerticalParallelModel(nn.Module):
     def __init__(self, model_parallel_size):
         super(VerticalParallelModel, self).__init__()
         self.model_parallel_size = model_parallel_size
-        self.embedding = ParallelEmbedding(2000, 20)
-        self.mlp = ParallelMLP(20, 0.5)
-        self.linear = ColumnParallelLinear(20, 2)
 
-    def forward(self, x):
-        x = self.embedding(x)
-        x = self.mlp(x)
-        x = self.linear(x)
-        return x
+        self.embedding = PipeParallelEmbedding(2000, 20)
+        self.linear1 = Linear_GPU_to_GPU(20,2,from_gpu=0)
+        self.linear2 = Linear_GPU_to_CPU(20,2)
+        self.linear3 = Linear_GPU_to_CPU(20, 2)
+        self.relu = nn.ReLU()
+
+
+    def forward(self, out):
+        out = out.to(torch.device('cuda:0')) #fetching output to gpu 0 if doesn't exist
+        out1 = self.embedding(out)
+        out1 = self.linear1(out1)
+        out1 = out1.to(torch.device('cpu')) #copying output of layers in gpu0 to cpu
+        out1 = out1.to(torch.device('cuda:1'))#copying output from cpu to gpu1 if doesn't exist
+        out2 = self.linear2(out1)
+        out2 = out2.to(torch.device('cuda:1'))#copying output from cpu to gpu1
+        out2 = self.linear3(out2)
+        out2 = out2.to(torch.device('cuda:1'))  # copying output from cpu to gpu1
+        output = self.relu(out2)
+        output = output.to(torch.device('cpu')) # copying final output back to cpu
+        return output
 
 
 class Trainer:
@@ -48,7 +61,7 @@ class Trainer:
     ) -> None:
         self.gpu_id = int(os.environ["LOCAL_RANK"])
         self.model = model.to(self.gpu_id)
-        self.model = nn.DataParallel(self.model)  # Wrap the model with DataParallel
+        self.model = DDP(self.model) #nn.DataParallel(self.model)  # Wrap the model with DataParallel
         self.train_data = train_data
         self.optimizer = optimizer
         self.save_every = save_every
@@ -149,8 +162,8 @@ class Trainer:
 
 def load_train_objs():
     train_set = MyTrainDataset(2048)
-
-    model = VerticalParallelModel(2)  # Use the custom VerticalParallelModel
+    #world_size = mpu.get_model_parallel_world_size()
+    model = VerticalParallelModel(2) #(world_size) # Use the custom VerticalParallelModel
 
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
@@ -176,9 +189,14 @@ def main(world_size, model_parallel_size, save_every: int, total_epochs: int, ba
     ddp_setup(world_size, model_parallel_size)
     dataset, model, optimizer, total_sparse_entries = load_train_objs()
     train_data = prepare_dataloader(dataset, batch_size)
-    trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
-    trainer.train(total_epochs,trainer)
-    destroy_process_group()
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
+                 profile_memory=True) as prof:
+        trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
+        trainer.train(total_epochs,trainer)
+        destroy_process_group()
+    print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=10))
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    print(prof.key_averages(group_by_input_shape=True).table(sort_by="self_cuda_memory_usage", row_limit=10))
 
 
 if __name__ == "__main__":
