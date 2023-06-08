@@ -108,7 +108,7 @@ class Trainer:
 
     def _run_epoch(self, epoch, max_epochs, trainer, start_time):
         b_sz = len(next(iter(self.train_data))[0])
-        print(f"[GPU{self.gpu_id}] Epoch {epoch} | Batchsize: {b_sz} | Steps: {len(self.train_data)}")
+        #print(f"[GPU{self.gpu_id}] Epoch {epoch} | Batchsize: {b_sz} | Steps: {len(self.train_data)}")
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
         total_batch_time = 0.0
@@ -124,12 +124,12 @@ class Trainer:
             if rank == 0:
                 batch_end_time = time.time()
                 total_batch_time = batch_end_time - batch_start_time
-                print(
-                    f"GPU: {rank} | Epoch: {epoch}/{max_epochs} | Batch: {batch_idx + 1}/{len(self.train_data)} | Batch Time: {total_batch_time:.4f}s")
+                #print(
+                #    f"GPU: {rank} | Epoch: {epoch}/{max_epochs} | Batch: {batch_idx + 1}/{len(self.train_data)} | Batch Time: {total_batch_time:.4f}s")
             torch.distributed.barrier()
 
         avg_batch_time = total_batch_time / len(self.train_data)
-        print(f"avg batch time: {avg_batch_time:.6f}s")
+        #print(f"avg batch time: {avg_batch_time:.6f}s")
         end_time = time.time()
         epoch_time = end_time - start_time
         torch.distributed.barrier()
@@ -137,7 +137,8 @@ class Trainer:
         torch.distributed.all_reduce(epoch_times)
         total_epoch_time = epoch_times.item()
         if rank == 0:
-            print(f"Epoch: {epoch + 1}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
+            pass
+            #print(f"Epoch: {epoch + 1}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
         if rank == 0 and epoch % trainer.save_every == 0:
             trainer._save_snapshot(epoch)
 
@@ -147,7 +148,7 @@ class Trainer:
             "EPOCHS_RUN": epoch,
         }
         torch.save(snapshot, self.snapshot_path)
-        print(f"Epoch {epoch} | Training snapshot saved at {self.snapshot_path}")
+        #print(f"Epoch {epoch} | Training snapshot saved at {self.snapshot_path}")
 
     def train(self, max_epochs: int,trainer):
         start_time = time.time()
@@ -172,12 +173,13 @@ class Trainer:
             torch.distributed.all_reduce(batch_times)
             total_batch_time = batch_times.item()
             if rank == 0:
-                print(
-                    f"GPU: {rank} | Epoch: {epoch}/{max_epochs} | Batch: {batch_idx + 1}/{len(trainer.train_data)} | Batch Time: {total_batch_time:.4f}s")
+                pass
+                #print(
+                 #   f"GPU: {rank} | Epoch: {epoch}/{max_epochs} | Batch: {batch_idx + 1}/{len(trainer.train_data)} | Batch Time: {total_batch_time:.4f}s")
             torch.distributed.barrier()
 
         avg_batch_time = total_batch_time / len(trainer.train_data)
-        print(f"avg batch time: {avg_batch_time:.6f}s")
+        #print(f"avg batch time: {avg_batch_time:.6f}s")
         end_time = time.time()
         epoch_time = end_time - start_time
         torch.distributed.barrier()
@@ -185,7 +187,8 @@ class Trainer:
         torch.distributed.all_reduce(epoch_times)
         total_epoch_time = epoch_times.item()
         if rank == 0:
-            print(f"Epoch: {epoch + 1}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
+            pass
+            #print(f"Epoch: {epoch + 1}/{max_epochs} | Epoch Time: {total_epoch_time:.4f}s")
         if rank == 0 and epoch % trainer.save_every == 0:
             trainer._save_snapshot(epoch)
 
@@ -219,14 +222,14 @@ def main(world_size, model_parallel_size, save_every: int, total_epochs: int, ba
     ddp_setup(world_size, model_parallel_size)
     dataset, model, optimizer, total_sparse_entries = load_train_objs()
     train_data = prepare_dataloader(dataset, batch_size)
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                  profile_memory=True) as prof:
         trainer = Trainer(model, train_data, optimizer, save_every, snapshot_path)
         trainer.train(total_epochs,trainer)
         destroy_process_group()
-    print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=10))
-    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
-    print(prof.key_averages(group_by_input_shape=True).table(sort_by="self_cuda_memory_usage", row_limit=10))
+    print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=20))
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+    print(prof.key_averages(group_by_input_shape=True).table(sort_by="self_cuda_memory_usage", row_limit=20))
 
 
 if __name__ == "__main__":
