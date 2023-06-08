@@ -316,7 +316,18 @@ class Linear_GPU_to_CPU(torch.nn.Module):
         self.weight = torch.nn.Parameter(self.weight.to(torch.device(f"cuda:{from_gpu}")))#self.weight.to(
             #torch.device(f"cuda:{from_gpu}"))  # Parameter(torch.Tensor(self.weight)).cuda(from_gpu)
         self.bias = torch.nn.Parameter(self.bias.to(torch.device(f"cuda:{from_gpu}")))#self.bias.to(torch.device(f"cuda:{from_gpu}"))  # Parameter(torch.Tensor(self.bias)).cuda(from_gpu)
-        output = F.linear(input_, self.weight.t(), self.bias.expand(input_.size(0), self.weight.t().size(1)))
+        print(f"input shape: {input_.shape}")
+        print(f"weight shape: {self.weight.shape}")
+        print(f"bias shape: {self.bias.shape}")
+        #output = F.linear(input_, self.weight.t(), self.bias.unsqueeze(0).expand(input_.size(0), -1))
+        input_ = input_.reshape(-1, input_.size(-1))
+
+        # Apply linear transformation
+        output = F.linear(input_, self.weight.t(), self.bias)
+
+        # Reshape output back to original shape
+        output = output.reshape(input_.size(0), input_.size(1), -1)
+
         output = output.to(torch.device('cpu'))  # Move output to GPU 1
         return output
 
