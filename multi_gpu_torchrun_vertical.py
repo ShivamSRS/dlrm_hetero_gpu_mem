@@ -101,10 +101,10 @@ class Trainer:
     def _run_batch(self, source, targets):
         self.optimizer.zero_grad()
         output = self.model(source)
-        loss = F.cross_entropy(output, targets)
-        print(f"Loss: {loss}")
-        loss.backward()
-        self.optimizer.step()
+        #loss = F.cross_entropy(output, targets)
+        #print(f"Loss: {loss}")
+        #loss.backward()
+        #self.optimizer.step()
 
     def _run_epoch(self, epoch, max_epochs, trainer, start_time):
         b_sz = len(next(iter(self.train_data))[0])

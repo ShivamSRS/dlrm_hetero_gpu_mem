@@ -75,9 +75,9 @@ def _initialize_affine_weight(weight, output_size, input_size,
     my_weight_list = weight_list[rank::world_size]
     if len(my_weight_list) != 0:
         with torch.no_grad():
-            print(f"my_weight: {my_weight_list}")
-            print(f"my_weight length: {len(my_weight_list)}")
-            print(f"my_weight_out: {weight}")
+            # print(f"my_weight: {my_weight_list}")
+            # print(f"my_weight length: {len(my_weight_list)}")
+            # print(f"my_weight_out: {weight}")
             torch.cat(my_weight_list, dim=partition_dim, out=weight)
         if return_master_weight:
             return master_weight
@@ -157,7 +157,7 @@ class PipeParallelEmbedding(torch.nn.Module):
         self.scale_grad_by_freq = False
         self.sparse = False
         self._weight = None
-        print("going inside embedding")
+        #print("going inside embedding")
         self.embedding_dim_per_partition = self.embedding_dim
 
         #if torch.distributed.get_rank() == 0:  # Store on GPU 0, if process rank is 0
@@ -170,7 +170,7 @@ class PipeParallelEmbedding(torch.nn.Module):
         #    self.register_parameter('weight', None)
             #self.weight.model_parallel = False
         #print(torch.cuda.memory_summary())
-        print(f"weight: {self.weight}")
+        #print(f"weight: {self.weight}")
         #print(f"embed_dim: {self.embedding_dim_per_partition}")
         #print(f"num_embed: {self.num_embeddings}")
         #print(f"embed_dim: {self.embedding_dim}")
@@ -182,9 +182,9 @@ class PipeParallelEmbedding(torch.nn.Module):
                 self.weight, self.num_embeddings, self.embedding_dim,
                 self.embedding_dim_per_partition, 1, init_method,
                 stride=1, return_master_weight=keep_master_weight_for_test,device_i='cuda:0')
-            print(f"PipeParallelEmbedding weight parallel: {self.master_weight}")
+            #print(f"PipeParallelEmbedding weight parallel: {self.master_weight}")
 
-        print("going outside embedding")
+        #print("going outside embedding")
 
     def forward(self, input_):
         input_ = input_.to(torch.device('cuda:0'))  # Move input to GPU 0
@@ -229,13 +229,13 @@ class Linear_GPU_to_GPU(torch.nn.Module):
         self.weight = Parameter(torch.Tensor(self.output_size,
                                              self.input_size))
         self.weight.model_parallel = False
-        print("going inside linear 1")
+        #print("going inside linear 1")
         #if torch.distributed.get_rank() == from_gpu:
         self.weight = Parameter(torch.Tensor(self.weight).cuda(from_gpu))
         if master_weight is not None:
             master_weight = Parameter(torch.Tensor(master_weight).cuda(from_gpu))
             self.weight = master_weight
-            print(f"GPUGPU Linear weight early: {self.weight}")
+            #print(f"GPUGPU Linear weight early: {self.weight}")
         #else:
         #    self.register_parameter('weight', None)
         if bias: #and torch.distributed.get_rank() == from_gpu:
@@ -247,16 +247,16 @@ class Linear_GPU_to_GPU(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
         if torch.distributed.get_rank() == from_gpu  and len(self.weight.size()) > 0:
-            print(f"gpu GPU weight: {self.weight}")
+            #print(f"gpu GPU weight: {self.weight}")
             # Initialize weight.
             self.master_weight = _initialize_affine_weight(
                 self.weight, self.output_size, self.input_size,
                 self.output_size, 0, init_method,
                 stride=stride, return_master_weight=keep_master_weight_for_test,device_i='cuda:0')
-            print(f"gpu GPU master weight: {self.master_weight}")
+            #print(f"gpu GPU master weight: {self.master_weight}")
         else:
             self.master_weight = self.weight
-        print("going out of linear 1")
+        #print("going out of linear 1")
 
     def forward(self, input_,from_gpu=0,to_gpu=1):
         input_ = input_.to(torch.device(f"cuda:{from_gpu}"))  # Move input to GPU 0
@@ -282,13 +282,13 @@ class Linear_GPU_to_CPU(torch.nn.Module):
         self.weight = Parameter(torch.Tensor(self.output_size,
                                              self.input_size))
         self.weight.model_parallel = False
-        print("going inside linear 2")
+        #print("going inside linear 2")
         #if torch.distributed.get_rank() == from_gpu:
         self.weight = Parameter(torch.Tensor(self.weight).cuda(from_gpu))
         if master_weight is not None:
             master_weight = Parameter(torch.Tensor(master_weight).cuda(from_gpu))
             self.weight = master_weight
-            print(f"gpucpu weight early: {self.weight}")
+            #print(f"gpucpu weight early: {self.weight}")
         #else:
             #self.register_parameter('weight', None)
         if bias:# and torch.distributed.get_rank() == from_gpu:
@@ -301,14 +301,14 @@ class Linear_GPU_to_CPU(torch.nn.Module):
             self.register_parameter('bias', None)
         if torch.distributed.get_rank() == from_gpu and len(self.weight.size()) > 0:
         # Initialize weight.
-            print(f"gpucpu weight: {self.weight}")
+            #print(f"gpucpu weight: {self.weight}")
             self.master_weight = _initialize_affine_weight(
                 self.weight, self.output_size, self.input_size,
                 self.output_size, 0, init_method,
                 stride=stride, return_master_weight=keep_master_weight_for_test,device_i='cuda:1')
-            print(f"gpu CPUUU master weight: {self.master_weight}")
+            #print(f"gpu CPUUU master weight: {self.master_weight}")
 
-        print("going out of linear 2")
+        #print("going out of linear 2")
 
 
     def forward(self, input_,from_gpu=1):
@@ -316,14 +316,14 @@ class Linear_GPU_to_CPU(torch.nn.Module):
         self.weight = torch.nn.Parameter(self.weight.to(torch.device(f"cuda:{from_gpu}")))#self.weight.to(
             #torch.device(f"cuda:{from_gpu}"))  # Parameter(torch.Tensor(self.weight)).cuda(from_gpu)
         self.bias = torch.nn.Parameter(self.bias.to(torch.device(f"cuda:{from_gpu}")))#self.bias.to(torch.device(f"cuda:{from_gpu}"))  # Parameter(torch.Tensor(self.bias)).cuda(from_gpu)
-        print(f"input shape: {input_.shape}")
-        print(f"weight shape: {self.weight.shape}")
-        print(f"bias shape: {self.bias.shape}")
+        #print(f"input shape: {input_.shape}")
+        #print(f"weight shape: {self.weight.shape}")
+        #print(f"bias shape: {self.bias.shape}")
         #output = F.linear(input_, self.weight.t(), self.bias.unsqueeze(0).expand(input_.size(0), -1))
         input_ = input_.reshape(-1, input_.size(-1))
 
         # Apply linear transformation
-        output = F.linear(input_, self.weight.t(), self.bias)
+        output = F.linear(input_, self.weight.t())#, self.bias)
 
         # Reshape output back to original shape
         output = output.reshape(input_.size(0), input_.size(1), -1)
