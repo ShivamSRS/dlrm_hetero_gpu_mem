@@ -154,7 +154,7 @@ def load_train_objs():
     train_set = MyTrainDataset(2048)  # load your dataset
 
     model = torch.nn.Sequential(ParallelEmbedding(2000, 20), ParallelMLP(20, 0.5), ColumnParallelLinear(20, 2))
-    # model = ColumnParallelLinear(20,2)
+    #model = ColumnParallelLinear(20,2)
     print(model)
     # model = torch.nn.Linear(20, 1)  # load your model
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)

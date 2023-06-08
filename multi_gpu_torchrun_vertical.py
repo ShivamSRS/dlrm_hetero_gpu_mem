@@ -24,30 +24,60 @@ def ddp_setup(world_size, model_parallel_size):
 
 
 class VerticalParallelModel(nn.Module):
+
     def __init__(self, model_parallel_size):
         super(VerticalParallelModel, self).__init__()
         self.model_parallel_size = model_parallel_size
-
-        self.embedding = PipeParallelEmbedding(2000, 20)
-        self.linear1 = Linear_GPU_to_GPU(20,2,from_gpu=0)
-        self.linear2 = Linear_GPU_to_CPU(20,2)
-        self.linear3 = Linear_GPU_to_CPU(20, 2)
-        self.relu = nn.ReLU()
-
+        # print("going inside embedding")
+        self.embedding = PipeParallelEmbedding(2000, 20).cuda(0)
+        # print("going inside linear 1")
+        self.linear1 = Linear_GPU_to_GPU(20,2,from_gpu=0).cuda(0)
+        # print("going inside linear 2")
+        self.linear2 = Linear_GPU_to_CPU(20,2,master_weight=self.linear1.master_weight).cuda(1)
+        # print("going inside linear 3")
+        #self.linear3 = Linear_GPU_to_CPU(20, 2).cuda(1)
+        # print("going inside relu")
+        self.relu = nn.ReLU().cuda(1)
+        #self.model = nn.Sequential(PipeParallelEmbedding(2000, 20).cuda(0),Linear_GPU_to_GPU(20,2,from_gpu=0).cuda(0),Linear_GPU_to_CPU(20,2).cuda(1),Linear_GPU_to_CPU(20, 2).cuda(1),nn.ReLU().cuda(1))
+        self.model = nn.Sequential(self.embedding, self.linear1,self.linear2,self.relu)#self.linear3,self.relu)
 
     def forward(self, out):
         out = out.to(torch.device('cuda:0')) #fetching output to gpu 0 if doesn't exist
         out1 = self.embedding(out)
         out1 = self.linear1(out1)
-        out1 = out1.to(torch.device('cpu')) #copying output of layers in gpu0 to cpu
+        #out1 = out1.to(torch.device('cpu')) #copying output of layers in gpu0 to cpu
         out1 = out1.to(torch.device('cuda:1'))#copying output from cpu to gpu1 if doesn't exist
         out2 = self.linear2(out1)
         out2 = out2.to(torch.device('cuda:1'))#copying output from cpu to gpu1
-        out2 = self.linear3(out2)
-        out2 = out2.to(torch.device('cuda:1'))  # copying output from cpu to gpu1
+        #out2 = self.linear3(out2)
+        #out2 = out2.to(torch.device('cuda:1'))  # copying output from cpu to gpu1
         output = self.relu(out2)
         output = output.to(torch.device('cpu')) # copying final output back to cpu
         return output
+
+
+    # def __init__(self, model_parallel_size):
+    #     super(VerticalParallelModel, self).__init__()
+    #     # self.model_parallel_size = model_parallel_size
+    #     # self.embedding = nn.Embedding(1200, 20).cuda(0)
+    #     # self.linear1 = nn.Linear(20, 2).cuda(0)
+    #     # self.linear2 = nn.Linear(20, 2).cuda(1)
+    #     # self.linear3 = nn.Linear(20, 2).cuda(1)
+    #     # self.relu = nn.ReLU().cuda(1)
+    #     self.model_parallel_size = model_parallel_size
+    #     self.embedding = nn.Embedding(1200, 20).cuda(0)
+    #     self.linear1 = ColumnParallelLinear(20, 2, gather_output=True).cuda(0)
+    #     self.linear2 = RowParallelLinear(2, 2).cuda(1)
+    #     self.linear3 = RowParallelLinear(2, 2).cuda(1)
+    #     self.relu = nn.ReLU().cuda(1)
+    #
+    # def forward(self, x):
+    #     x = self.embedding(x)
+    #     x = self.linear1(x)
+    #     x = self.linear2(x)
+    #     x = self.linear3(x)
+    #     x = self.relu(x)
+    #     return x
 
 
 class Trainer:
@@ -161,7 +191,7 @@ class Trainer:
 
 
 def load_train_objs():
-    train_set = MyTrainDataset(2048)
+    train_set = MyTrainDataset(2048)#.to('cuda:0')
     #world_size = mpu.get_model_parallel_world_size()
     model = VerticalParallelModel(2) #(world_size) # Use the custom VerticalParallelModel
 
