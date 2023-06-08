@@ -260,8 +260,8 @@ class Linear_GPU_to_GPU(torch.nn.Module):
 
     def forward(self, input_,from_gpu=0,to_gpu=1):
         input_ = input_.to(torch.device(f"cuda:{from_gpu}"))  # Move input to GPU 0
-        self.weight = self.weight.to(torch.device(f"cuda:{from_gpu}"))#Parameter(torch.Tensor(self.weight)).cuda(from_gpu)
-        self.bias = self.bias.to(torch.device(f"cuda:{from_gpu}"))#Parameter(torch.Tensor(self.bias)).cuda(from_gpu)
+        self.weight = torch.nn.Parameter(self.weight.to(torch.device(f"cuda:{from_gpu}")))#Parameter(torch.Tensor(self.weight)).cuda(from_gpu)#self.weight.to(torch.device(f"cuda:{from_gpu}"))
+        self.bias = torch.nn.Parameter(self.bias.to(torch.device(f"cuda:{from_gpu}")))#Parameter(torch.Tensor(self.bias)).cuda(from_gpu)#self.bias.to(torch.device(f"cuda:{from_gpu}"))
         output = F.linear(input_, self.weight, self.bias)
         output = output.to(torch.device(f"cuda:{from_gpu}"))
         #output = output.to(torch.device(f"cuda:{to_gpu}"))  # Move output to GPU 1
@@ -313,10 +313,10 @@ class Linear_GPU_to_CPU(torch.nn.Module):
 
     def forward(self, input_,from_gpu=1):
         input_ = input_.to(torch.device(f"cuda:{from_gpu}"))  # Move input to GPU 1
-        self.weight = self.weight.to(
-            torch.device(f"cuda:{from_gpu}"))  # Parameter(torch.Tensor(self.weight)).cuda(from_gpu)
-        self.bias = self.bias.to(torch.device(f"cuda:{from_gpu}"))  # Parameter(torch.Tensor(self.bias)).cuda(from_gpu)
-        output = F.linear(input_, self.weight, self.bias)
+        self.weight = torch.nn.Parameter(self.weight.to(torch.device(f"cuda:{from_gpu}")))#self.weight.to(
+            #torch.device(f"cuda:{from_gpu}"))  # Parameter(torch.Tensor(self.weight)).cuda(from_gpu)
+        self.bias = torch.nn.Parameter(self.bias.to(torch.device(f"cuda:{from_gpu}")))#self.bias.to(torch.device(f"cuda:{from_gpu}"))  # Parameter(torch.Tensor(self.bias)).cuda(from_gpu)
+        output = F.linear(input_, self.weight.t(), self.bias.expand(input_.size(0), self.weight.t().size(1)))
         output = output.to(torch.device('cpu'))  # Move output to GPU 1
         return output
 
